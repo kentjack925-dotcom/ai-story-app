@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import os
 import logging
 from openai import OpenAI
+from openai import APIError, BadRequestError
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -293,11 +294,19 @@ def read_root(request: Request):
                     
                     loading.classList.remove('active');
                     resultSection.classList.add('active');
-                    document.getElementById('result-box').textContent = data.result;
+                    
+                    if (response.ok) {
+                        document.getElementById('result-box').textContent = data.result;
+                    } else {
+                        // 显示详细错误信息
+                        document.getElementById('result-box').innerHTML = 
+                            `<span style="color: #d32f2f;">❌ 错误 (${response.status}): ${data.detail || '未知错误'}</span>`;
+                    }
                     
                 } catch (error) {
                     loading.classList.remove('active');
-                    alert('生成失败，请重试！');
+                    document.getElementById('result-box').innerHTML = 
+                        `<span style="color: #d32f2f;">❌ 网络错误: ${error.message}</span>`;
                     console.error(error);
                 } finally {
                     btn.disabled = false;
@@ -328,26 +337,49 @@ def generate_outline(request: StoryRequest):
         logger.error("DEEPSEEK_API_KEY 环境变量未设置!")
         raise HTTPException(status_code=500, detail="API Key 未配置，请联系管理员")
     
+    # 构造消息
+    messages = [
+        {
+            "role": "system",
+            "content": "你是一个专业编剧，请生成故事大纲（包含标题+三幕结构）。请用优美的中文回答。"
+        },
+        {
+            "role": "user",
+            "content": f"请根据这个主题创作故事：{user_prompt}"
+        }
+    ]
+    
+    logger.info(f"发送给 API 的消息: {messages}")
+    logger.info(f"用户提示长度: {len(user_prompt)} 字符")
+    
     try:
         logger.info("开始调用 DeepSeek API...")
         completion = client.chat.completions.create(
             model="deepseek-chat",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业编剧，请生成故事大纲（包含标题+三幕结构）。请用优美的中文回答。"
-                },
-                {
-                    "role": "user",
-                    "content": f"请根据这个主题创作故事：{user_prompt}"
-                }
-            ]
+            messages=messages
         )
         logger.info("DeepSeek API 调用成功")
         
         result = completion.choices[0].message.content
         return {"result": result}
         
+    except BadRequestError as e:
+        # 捕获 400 错误
+        logger.error(f"BadRequestError: {str(e)}")
+        logger.error(f"错误详情: {e.__dict__}")
+        if hasattr(e, 'body') and e.body:
+            logger.error(f"API 返回的错误体: {e.body}")
+        raise HTTPException(status_code=400, detail=f"请求错误: {str(e)}")
+        
+    except APIError as e:
+        # 捕获其他 API 错误
+        logger.error(f"APIError: {str(e)}")
+        logger.error(f"错误类型: {type(e)}")
+        raise HTTPException(status_code=500, detail=f"API 错误: {str(e)}")
+        
     except Exception as e:
         logger.error(f"调用 DeepSeek API 失败: {str(e)}")
+        logger.error(f"错误类型: {type(e)}")
+        import traceback
+        logger.error(f"完整堆栈: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
