@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import os
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+# Vercel 环境通过平台设置环境变量，本地开发用 .env
+if os.path.exists(".env"):
+    from dotenv import load_dotenv
+    load_dotenv()
 
 app = FastAPI(title="先问春风 - AI故事创作")
 
