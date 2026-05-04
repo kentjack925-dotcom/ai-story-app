@@ -1,8 +1,13 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import os
+import logging
 from openai import OpenAI
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Vercel 环境通过平台设置环境变量，本地开发用 .env
 if os.path.exists(".env"):
@@ -12,8 +17,12 @@ if os.path.exists(".env"):
 app = FastAPI(title="先问春风 - AI故事创作")
 
 # 初始化DeepSeek客户端
+api_key = os.getenv("DEEPSEEK_API_KEY")
+logger.info(f"DEEPSEEK_API_KEY 是否存在: {bool(api_key)}")
+logger.info(f"DEEPSEEK_API_KEY 长度: {len(api_key) if api_key else 0}")
+
 client = OpenAI(
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    api_key=api_key,
     base_url="https://api.deepseek.com"
 )
 
@@ -311,23 +320,34 @@ def read_root(request: Request):
 @app.post("/generate-outline")
 def generate_outline(request: StoryRequest):
     user_prompt = request.prompt
-
-    completion = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[
-            {
-                "role": "system",
-                "content": "你是一个专业编剧，请生成故事大纲（包含标题+三幕结构）。请用优美的中文回答。"
-            },
-            {
-                "role": "user",
-                "content": f"请根据这个主题创作故事：{user_prompt}"
-            }
-        ]
-    )
-
-    result = completion.choices[0].message.content
-
-    return {
-        "result": result
-    }
+    logger.info(f"收到用户请求: {user_prompt[:50]}...")
+    
+    # 检查 API Key 是否存在
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        logger.error("DEEPSEEK_API_KEY 环境变量未设置!")
+        raise HTTPException(status_code=500, detail="API Key 未配置，请联系管理员")
+    
+    try:
+        logger.info("开始调用 DeepSeek API...")
+        completion = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是一个专业编剧，请生成故事大纲（包含标题+三幕结构）。请用优美的中文回答。"
+                },
+                {
+                    "role": "user",
+                    "content": f"请根据这个主题创作故事：{user_prompt}"
+                }
+            ]
+        )
+        logger.info("DeepSeek API 调用成功")
+        
+        result = completion.choices[0].message.content
+        return {"result": result}
+        
+    except Exception as e:
+        logger.error(f"调用 DeepSeek API 失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
